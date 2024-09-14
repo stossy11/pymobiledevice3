@@ -16,11 +16,11 @@ from construct import StreamError
 from fastapi import FastAPI
 from packaging.version import Version
 
-from pymobiledevice3 import usbmux
+from pymobiledevice3 import usbmux, pair_records, common
 from pymobiledevice3.bonjour import REMOTED_SERVICE_NAMES, browse
 from pymobiledevice3.exceptions import ConnectionFailedError, ConnectionFailedToUsbmuxdError, GetProhibitedError, \
     InvalidServiceError, MuxException, PairingError, TunneldConnectionError
-from pymobiledevice3.lockdown import create_using_usbmux, get_mobdev2_lockdowns
+from pymobiledevice3.lockdown import create_using_tcp, create_using_usbmux, get_mobdev2_lockdowns
 from pymobiledevice3.osu.os_utils import get_os_utils
 from pymobiledevice3.remote.common import TunnelProtocol
 from pymobiledevice3.remote.module_imports import start_tunnel
@@ -413,6 +413,19 @@ class TunneldRunner:
             created_task = False
 
             try:
+                if not created_task and connection_type in ('usbmux-tcp', None):
+                    task_identifier = f'usbmux-tcp-{udid}'
+                    try:
+                        pr = pair_records.get_local_pairing_record(udid, pairing_records_cache_folder=common.get_home_folder())
+                        service = CoreDeviceTunnelProxy(create_using_tcp(identifier=udid, hostname=ip, pair_record=pr))
+                        task = asyncio.create_task(
+                            self._tunneld_core.start_tunnel_task(task_identifier, service, protocol=TunnelProtocol.TCP,
+                                                                 queue=queue),
+                            name=f'start-tunnel-task-{task_identifier}')
+                        self._tunneld_core.tunnel_tasks[task_identifier] = TunnelTask(task=task, udid=udid)
+                        created_task = True
+                    except (ConnectionFailedError, InvalidServiceError, MuxException):
+                        pass
                 if not created_task and connection_type in ('usbmux', None):
                     task_identifier = f'usbmux-{udid}'
                     try:
